@@ -71,7 +71,6 @@ async function renderJsonData(ctx, data) {
           padding: 40px;
           background: #f0f2f5;
           font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
-          display: inline-block; /* 自适应内容大小 */
         }
 
         .card {
@@ -229,8 +228,9 @@ async function renderJsonData(ctx, data) {
     // 等待字体加载（如果用了网络字体）或者简单等待一下
     //await page.waitForTimeout(1000)
 
-    const body = await page.$('body')
-    const buffer = await body.screenshot({ type: 'png' })
+    const cardElement = await page.$('#card-element')
+    if (!cardElement) throw new Error("Element not found")
+    const buffer = await cardElement.screenshot({ type: 'png' })
 
     return h.image(buffer, 'image/png')
 
@@ -266,12 +266,15 @@ export function apply(ctx: Context, config: Config) {
       } else {
         const atList = ctx['gouqi_base'].getAtList(input);
         // const atList = [{
-        //   type: 'at',
-        //   attrs: { id: '3127931536', name: '@莫名其妙' },
+        //   type: 'text',
+        //   attrs: { content: '3127931536' },
         //   children: []
         // }];
         if (atList.length > 0) {
-          const avatar64 = await ctx['gouqi_base'].getAvatar64(atList[0].attrs.id);
+          const avatar64 = await ctx['gouqi_base'].getAvatar64(atList[0].attrs.content);
+          image64 = avatar64.dataUrl;
+        } else {
+          const avatar64 = await ctx['gouqi_base'].getAvatar64(session.userId);
           image64 = avatar64.dataUrl;
         }
       }
@@ -282,7 +285,7 @@ export function apply(ctx: Context, config: Config) {
         const response = await ctx.http.post(`${config.apiUrl}/chat/completions`, {
           model: config.model,
           messages: [
-            { role: 'system', content: config.systemPrompt || "你是一个乐于助人的助手" },
+            { role: 'system', content: config.systemPrompt || "你是一个乐于助人的ai助手" },
             {
               role: 'user', content: [
                 {
@@ -330,14 +333,27 @@ export function apply(ctx: Context, config: Config) {
               // `
               // const match = tempText.match(/```json([\s\S]*?)```/);
               const match = responContent.match(/```json([\s\S]*?)```/);
+              // 1. 尝试匹配 Markdown json 代码块
+              let jsonStr = '';
               let responJson;
               if (match && match[1]) {
-                const jsonStr = match[1].trim(); // 去除空白
-                responJson = JSON.parse(jsonStr);
+                jsonStr = match[1].trim(); // 去除空白
               } else {
-                const jsonStr = match[1].trim();
-                responJson = JSON.parse(jsonStr);
+                // 2. 如果没找到代码块，尝试寻找最外层的 {}
+                const firstBrace = responContent.indexOf('{');
+                const lastBrace = responContent.lastIndexOf('}');
+                if (firstBrace !== -1 && lastBrace !== -1) {
+                  jsonStr = responContent.substring(firstBrace, lastBrace + 1);
+                } else {
+                  // 3. 实在没办法，假设整个内容就是 JSON（虽然不太可能）
+                  jsonStr = responContent.trim();
+                }
               }
+              // 清理可能的非法字符（部分模型会输出非标准控制字符）
+              jsonStr = jsonStr.replace(/[\u0000-\u001F]+/g, (char) => {
+                return ["\r", "\n", "\t"].includes(char) ? char : "";
+              });
+              responJson = JSON.parse(jsonStr);
               const image = await renderJsonData(ctx, responJson);
               return image;
             } catch (error) {

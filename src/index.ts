@@ -2,12 +2,11 @@ import { Context, Schema, h } from 'koishi'
 
 export const name = 'gouqi-smash'
 
+
 export interface Config {
-  apiUrl: string;
-  apiKey: string;
+  apiSettings: any;
   systemPrompt: string;
   inputPrompt: string;
-  model: string;
   replyInJsonFormat: boolean;
 }
 
@@ -17,13 +16,17 @@ export const inject = {
 
 
 export const Config: Schema<Config> = Schema.object({
-  apiUrl: Schema.string()
-    .default('')
-    .description('The base URL for the OpenAI-compatible API usually ends with /v1'),
-  apiKey: Schema.string()
-    .required()
-    .role('secret')
-    .description('Your OpenAI API Key or compatible API key.'),
+  apiSettings: Schema.array(Schema.object({
+    apiUrl: Schema.string()
+      .required()
+      .description('The base URL for the OpenAI-compatible API usually ends with /v1'),
+    apiKey: Schema.string()
+      .required()
+      .description('Your API Key or compatible API key.'),
+    model: Schema.string()
+      .required()
+      .description('The AI model to use for chat completions.'),
+  })).description('API 配置'),
   systemPrompt: Schema.string()
     .default('')
     .description('The initial system prompt for the AI model.'),
@@ -43,10 +46,7 @@ export const Config: Schema<Config> = Schema.object({
       "rating": 1-10 之间的数字,
       "explanation": "你的理由，用非常接地气的中文表达。"
     }
-    `),
-  model: Schema.string()
-    .default('gemini-2.5-flash')
-    .description('The AI model to use for chat completions.'),
+    `)
 
 });
 
@@ -251,7 +251,12 @@ async function renderTextData(ctx, text) {
 export function apply(ctx: Context, config: Config) {
   ctx.command('smash', 'smash 图片/艾特')
     .action(async ({ session }, input) => {
-      const imageList = ctx['gouqi_base'].getImgList(input);
+      if (config.apiSettings.length == 0) {
+        return '没有配置API'
+      }
+      const apiSetting = config.apiSettings[Math.floor(Math.random()*config.apiSettings.length)]
+      //console.log(apiSetting)
+      const imageList = ctx['gouqi_base'].getImgList(input)
       // const imageList = [{
       //   type: 'img',
       //   attrs: {
@@ -259,22 +264,22 @@ export function apply(ctx: Context, config: Config) {
       //   },
       //   children: []
       // }];
-      let image64;
+      let image64
       if (imageList.length > 0) {
-        const image64Data = await ctx['gouqi_base'].downloadImageAsBase64(imageList[0].attrs.src);
+        const image64Data = await ctx['gouqi_base'].downloadImageAsBase64(imageList[0].attrs.src)
         image64 = image64Data.dataUrl;
       } else {
-        const atList = ctx['gouqi_base'].getAtList(input);
+        const atList = ctx['gouqi_base'].getAtList(input)
         // const atList = [{
         //   type: 'text',
         //   attrs: { content: '3127931536' },
         //   children: []
         // }];
         if (atList.length > 0) {
-          const avatar64 = await ctx['gouqi_base'].getAvatar64(atList[0].attrs.content);
+          const avatar64 = await ctx['gouqi_base'].getAvatar64(atList[0].attrs.content)
           image64 = avatar64.dataUrl;
         } else {
-          const avatar64 = await ctx['gouqi_base'].getAvatar64(session.userId);
+          const avatar64 = await ctx['gouqi_base'].getAvatar64(session.userId)
           image64 = avatar64.dataUrl;
         }
       }
@@ -282,8 +287,8 @@ export function apply(ctx: Context, config: Config) {
         return "未发现图片";
       }
       try {
-        const response = await ctx.http.post(`${config.apiUrl}/chat/completions`, {
-          model: config.model,
+        const response = await ctx.http.post(`${apiSetting.apiUrl}/chat/completions`, {
+          model: apiSetting.model,
           messages: [
             { role: 'system', content: config.systemPrompt || "你是一个乐于助人的ai助手" },
             {
@@ -303,7 +308,7 @@ export function apply(ctx: Context, config: Config) {
           ],
         }, {
           headers: {
-            'Authorization': `Bearer ${config.apiKey}`,
+            'Authorization': `Bearer ${apiSetting.apiKey}`,
             'Content-Type': 'application/json',
           },
         });
